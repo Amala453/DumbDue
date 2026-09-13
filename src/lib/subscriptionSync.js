@@ -4,13 +4,19 @@ import { supabase } from "./supabase";
   Convert a DumbDue subscription object
   into the format used by Supabase.
 */
-function toDatabaseRow(subscription, userId) {
+function toDatabaseRow(
+  subscription,
+  userId
+) {
   return {
     id: subscription.id,
+
     user_id: userId,
 
     name: subscription.name,
-    category: subscription.category,
+
+    category:
+      subscription.category,
 
     amount: Number(
       subscription.amount || 0
@@ -20,22 +26,29 @@ function toDatabaseRow(subscription, userId) {
       subscription.currency || "₹",
 
     cycle:
-      subscription.cycle || "Monthly",
+      subscription.cycle ||
+      "Monthly",
 
     next_payment:
-      subscription.nextPayment || null,
+      subscription.nextPayment ||
+      null,
 
     payment_method:
-      subscription.paymentMethod || null,
+      subscription.paymentMethod ||
+      null,
 
     is_trial:
-      Boolean(subscription.isTrial),
+      Boolean(
+        subscription.isTrial
+      ),
 
     trial_end_date:
-      subscription.trialEndDate || null,
+      subscription.trialEndDate ||
+      null,
 
     status:
-      subscription.status || "Active",
+      subscription.status ||
+      "Active",
 
     payment_history:
       Array.isArray(
@@ -59,10 +72,13 @@ function fromDatabaseRow(row) {
 
     name: row.name,
 
-    category: row.category,
+    category:
+      row.category,
 
     amount:
-      Number(row.amount || 0),
+      Number(
+        row.amount || 0
+      ),
 
     currency:
       row.currency || "₹",
@@ -74,16 +90,21 @@ function fromDatabaseRow(row) {
       row.next_payment || "",
 
     paymentMethod:
-      row.payment_method || "Card",
+      row.payment_method ||
+      "Card",
 
     isTrial:
-      Boolean(row.is_trial),
+      Boolean(
+        row.is_trial
+      ),
 
     trialEndDate:
-      row.trial_end_date || null,
+      row.trial_end_date ||
+      null,
 
     status:
-      row.status || "Active",
+      row.status ||
+      "Active",
 
     paymentHistory:
       Array.isArray(
@@ -118,8 +139,11 @@ export async function getCurrentUser() {
 }
 
 /*
-  Load all subscriptions belonging
-  to the logged-in user.
+  Load ONLY the subscriptions belonging
+  to the currently logged-in user.
+
+  IMPORTANT:
+  We never read localStorage here.
 */
 export async function loadCloudSubscriptions() {
   const user =
@@ -134,7 +158,9 @@ export async function loadCloudSubscriptions() {
     error,
   } =
     await supabase
-      .from("subscriptions")
+      .from(
+        "subscriptions"
+      )
       .select("*")
       .eq(
         "user_id",
@@ -160,7 +186,7 @@ export async function loadCloudSubscriptions() {
 }
 
 /*
-  Save one subscription to the cloud.
+  Save one subscription.
 */
 export async function saveCloudSubscription(
   subscription
@@ -184,12 +210,13 @@ export async function saveCloudSubscription(
     error,
   } =
     await supabase
-      .from("subscriptions")
+      .from(
+        "subscriptions"
+      )
       .upsert(
         row,
         {
-          onConflict:
-            "id",
+          onConflict: "id",
         }
       );
 
@@ -199,11 +226,11 @@ export async function saveCloudSubscription(
 }
 
 /*
-  Save the entire current subscription
-  list to the cloud.
+  Save the complete subscription list
+  for the CURRENT logged-in user.
 
-  Existing rows are updated.
-  Removed rows are deleted.
+  There is intentionally NO localStorage
+  migration in this function.
 */
 export async function saveAllCloudSubscriptions(
   subscriptions
@@ -227,24 +254,18 @@ export async function saveAllCloudSubscriptions(
     );
 
   /*
-    Get the subscription IDs that currently
-    exist in the app.
+    Save current subscriptions.
   */
-  const currentIds =
-    subscriptions.map(
-      (subscription) =>
-        subscription.id
-    );
-
-  /*
-    Save current rows.
-  */
-  if (rows.length > 0) {
+  if (
+    rows.length > 0
+  ) {
     const {
       error,
     } =
       await supabase
-        .from("subscriptions")
+        .from(
+          "subscriptions"
+        )
         .upsert(
           rows,
           {
@@ -259,14 +280,16 @@ export async function saveAllCloudSubscriptions(
   }
 
   /*
-    Find cloud rows for this user.
+    Find rows owned by THIS user only.
   */
   const {
     data: existingRows,
     error: fetchError,
   } =
     await supabase
-      .from("subscriptions")
+      .from(
+        "subscriptions"
+      )
       .select("id")
       .eq(
         "user_id",
@@ -278,11 +301,22 @@ export async function saveAllCloudSubscriptions(
   }
 
   /*
-    Delete cloud rows that no longer
-    exist in the app.
+    IDs currently in the app.
+  */
+  const currentIds =
+    subscriptions.map(
+      (subscription) =>
+        subscription.id
+    );
+
+  /*
+    Delete ONLY this user's cloud rows
+    that no longer exist locally.
   */
   const idsToDelete =
-    (existingRows || [])
+    (
+      existingRows || []
+    )
       .map(
         (row) =>
           row.id
@@ -303,7 +337,9 @@ export async function saveAllCloudSubscriptions(
         deleteError,
     } =
       await supabase
-        .from("subscriptions")
+        .from(
+          "subscriptions"
+        )
         .delete()
         .eq(
           "user_id",
@@ -321,10 +357,17 @@ export async function saveAllCloudSubscriptions(
 }
 
 /*
-  One-time migration:
-  copy existing local subscriptions
-  to the cloud, but only when the
-  cloud account has no subscriptions.
+  IMPORTANT SECURITY CHANGE
+
+  This function keeps the same name so
+  your existing App.jsx does not need to
+  be rewritten.
+
+  It completely ignores localSubscriptions.
+
+  A newly logged-in account therefore
+  NEVER receives another account's
+  browser-local subscriptions.
 */
 export async function migrateLocalSubscriptions(
   localSubscriptions
@@ -332,44 +375,9 @@ export async function migrateLocalSubscriptions(
   const cloud =
     await loadCloudSubscriptions();
 
-  /*
-    Cloud already has data.
-    Never overwrite it with local data.
-  */
-  if (
-    cloud.length > 0
-  ) {
-    return {
-      source: "cloud",
-      subscriptions:
-        cloud,
-    };
-  }
-
-  /*
-    Cloud is empty and local has data.
-    Migrate local data.
-  */
-  if (
-    localSubscriptions.length >
-    0
-  ) {
-    await saveAllCloudSubscriptions(
-      localSubscriptions
-    );
-
-    return {
-      source: "local",
-      subscriptions:
-        localSubscriptions,
-    };
-  }
-
-  /*
-    Both are empty.
-  */
   return {
-    source: "empty",
-    subscriptions: [],
+    source: "cloud",
+    subscriptions:
+      cloud,
   };
 }
