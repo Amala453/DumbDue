@@ -64,8 +64,6 @@ const TRIAL_REMINDERS_KEY =
    CONSTANTS
 ========================================================= */
 
-const emptySubscriptions = [];
-
 const navItems = [
   {
     id: "dashboard",
@@ -147,38 +145,6 @@ function readStorageArray(key) {
   } catch {
     return null;
   }
-}
-
-function loadSubscriptionsSafely() {
-  const primary =
-    readStorageArray(
-      SUBSCRIPTIONS_KEY
-    );
-
-  const backup =
-    readStorageArray(
-      BACKUP_KEY
-    );
-
-  if (
-    primary &&
-    primary.length > 0
-  ) {
-    return primary;
-  }
-
-  if (
-    backup &&
-    backup.length > 0
-  ) {
-    return backup;
-  }
-
-  if (primary) {
-    return primary;
-  }
-
-  return emptySubscriptions;
 }
 
 /* =========================================================
@@ -570,17 +536,19 @@ function App() {
     "dashboard"
   );
 
+  /*
+    IMPORTANT:
+    Start with an empty array.
+
+    We DO NOT load browser-local subscription
+    data before Supabase identifies the current
+    account.
+  */
+
   const [
     subscriptions,
     setSubscriptions,
-  ] = useState(() => {
-    const stored =
-      loadSubscriptionsSafely();
-
-    return normalizeSubscriptions(
-      stored
-    );
-  });
+  ] = useState([]);
 
   const [
     cloudReady,
@@ -601,9 +569,6 @@ function App() {
     userEmail,
     setUserEmail,
   ] = useState("");
-
-  const didInitializeStorage =
-    useRef(false);
 
   const [
     search,
@@ -638,7 +603,8 @@ function App() {
   ======================================================= */
 
   useEffect(() => {
-    let mounted = true;
+    let mounted =
+      true;
 
     async function loadUser() {
       const {
@@ -664,6 +630,73 @@ function App() {
 
     return () => {
       mounted = false;
+    };
+  }, []);
+
+  /* =======================================================
+     LOAD CLOUD DATA
+  ======================================================= */
+
+  useEffect(() => {
+    let cancelled =
+      false;
+
+    async function initializeCloudData() {
+      try {
+        setCloudSyncError("");
+
+        /*
+          The current account is the only source
+          of truth now.
+
+          migrateLocalSubscriptions() no longer
+          copies localStorage into the account.
+        */
+
+        const result =
+          await migrateLocalSubscriptions(
+            []
+          );
+
+        if (cancelled) {
+          return;
+        }
+
+        setSubscriptions(
+          normalizeSubscriptions(
+            result.subscriptions
+          )
+        );
+
+        setCloudReady(
+          true
+        );
+      } catch (error) {
+        console.error(
+          "Cloud initialization failed:",
+          error
+        );
+
+        if (!cancelled) {
+          setCloudSyncError(
+            "Cloud sync is unavailable right now."
+          );
+
+          setSubscriptions(
+            []
+          );
+
+          setCloudReady(
+            true
+          );
+        }
+      }
+    }
+
+    initializeCloudData();
+
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -778,60 +811,6 @@ function App() {
   });
 
   /* =======================================================
-     CLOUD INITIAL LOAD / MIGRATION
-  ======================================================= */
-
-  useEffect(() => {
-    let cancelled =
-      false;
-
-    async function initializeCloudData() {
-      try {
-        setCloudSyncError("");
-
-        const localSubscriptions =
-          loadSubscriptionsSafely();
-
-        const result =
-          await migrateLocalSubscriptions(
-            localSubscriptions
-          );
-
-        if (cancelled) {
-          return;
-        }
-
-        setSubscriptions(
-          normalizeSubscriptions(
-            result.subscriptions
-          )
-        );
-
-        setCloudReady(true);
-      } catch (error) {
-        console.error(
-          "Cloud initialization failed:",
-          error
-        );
-
-        if (!cancelled) {
-          setCloudSyncError(
-            "Cloud sync is unavailable right now. Your browser data is still being used."
-          );
-
-          setCloudReady(true);
-        }
-      }
-    }
-
-    initializeCloudData();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  /* =======================================================
      LOCAL SETTINGS
   ======================================================= */
 
@@ -843,7 +822,9 @@ function App() {
 
     localStorage.setItem(
       DARK_MODE_KEY,
-      String(darkMode)
+      String(
+        darkMode
+      )
     );
 
     localStorage.setItem(
@@ -855,7 +836,9 @@ function App() {
 
     localStorage.setItem(
       REMINDER_DAYS_KEY,
-      String(reminderDays)
+      String(
+        reminderDays
+      )
     );
 
     localStorage.setItem(
@@ -877,6 +860,10 @@ function App() {
   ======================================================= */
 
   useEffect(() => {
+    if (!cloudReady) {
+      return;
+    }
+
     setSubscriptions(
       (current) => {
         const processed =
@@ -894,61 +881,17 @@ function App() {
           : processed;
       }
     );
-  }, []);
+  }, [
+    cloudReady,
+  ]);
 
   /* =======================================================
-     LOCAL BACKUP / STORAGE
-  ======================================================= */
+     LOCAL BACKUP
+========================================================= */
 
   useEffect(() => {
-    if (
-      !didInitializeStorage.current
-    ) {
-      didInitializeStorage.current =
-        true;
-
-      const stored =
-        readStorageArray(
-          SUBSCRIPTIONS_KEY
-        );
-
-      const backup =
-        readStorageArray(
-          BACKUP_KEY
-        );
-
-      if (
-        subscriptions.length ===
-          0 &&
-        stored &&
-        stored.length > 0
-      ) {
-        setSubscriptions(
-          normalizeSubscriptions(
-            stored
-          )
-        );
-
-        return;
-      }
-
-      if (
-        subscriptions.length ===
-          0 &&
-        (!stored ||
-          stored.length ===
-            0) &&
-        backup &&
-        backup.length > 0
-      ) {
-        setSubscriptions(
-          normalizeSubscriptions(
-            backup
-          )
-        );
-
-        return;
-      }
+    if (!cloudReady) {
+      return;
     }
 
     try {
@@ -961,6 +904,11 @@ function App() {
         localStorage.getItem(
           SUBSCRIPTIONS_KEY
         );
+
+      /*
+        Preserve previous non-empty local data
+        as an emergency browser backup.
+      */
 
       if (
         existingRaw &&
@@ -997,7 +945,10 @@ function App() {
     } catch {
       // Ignore storage errors.
     }
-  }, [subscriptions]);
+  }, [
+    subscriptions,
+    cloudReady,
+  ]);
 
   /* =======================================================
      CLOUD AUTO-SAVE
@@ -1132,7 +1083,7 @@ function App() {
     monthlyTotal * 12;
 
   /* =======================================================
-     UPCOMING PAYMENTS
+     UPCOMING
   ======================================================= */
 
   const upcoming =
@@ -1155,10 +1106,13 @@ function App() {
             b.nextPayment
           )
       )
-      .slice(0, 5);
+      .slice(
+        0,
+        5
+      );
 
   /* =======================================================
-     ACTIVE TRIALS
+     TRIALS
   ======================================================= */
 
   const activeTrials =
@@ -1250,7 +1204,9 @@ function App() {
         getAllHistory(
           subscriptions
         ),
-      [subscriptions]
+      [
+        subscriptions,
+      ]
     );
 
   /* =======================================================
@@ -1283,7 +1239,9 @@ function App() {
       ]
     );
 
-    setShowAdd(false);
+    setShowAdd(
+      false
+    );
   }
 
   /* =======================================================
@@ -1447,7 +1405,7 @@ function App() {
   }
 
   /* =======================================================
-     EXPORT DATA
+     EXPORT
   ======================================================= */
 
   function exportData() {
@@ -1507,7 +1465,8 @@ function App() {
             10
           );
 
-      link.href = url;
+      link.href =
+        url;
 
       link.download =
         `dumbdue-backup-${date}.json`;
@@ -1535,7 +1494,7 @@ function App() {
   }
 
   /* =======================================================
-     IMPORT DATA
+     IMPORT
   ======================================================= */
 
   function triggerImport() {
@@ -1571,12 +1530,9 @@ function App() {
         );
       }
 
-      const importedSubscriptions =
-        imported.subscriptions;
-
       if (
         !Array.isArray(
-          importedSubscriptions
+          imported.subscriptions
         )
       ) {
         throw new Error(
@@ -1612,8 +1568,7 @@ function App() {
             Array.isArray(
               current
             ) &&
-            current.length >
-              0
+            current.length > 0
           ) {
             localStorage.setItem(
               BACKUP_KEY,
@@ -1627,7 +1582,7 @@ function App() {
 
       const normalized =
         normalizeSubscriptions(
-          importedSubscriptions
+          imported.subscriptions
         );
 
       setSubscriptions(
@@ -1709,7 +1664,7 @@ function App() {
   }
 
   /* =======================================================
-     RESTORE AUTOMATIC BACKUP
+     RESTORE BACKUP
   ======================================================= */
 
   function restoreAutomaticBackup() {
@@ -1790,7 +1745,9 @@ function App() {
   }
 
   function closeModal() {
-    setShowAdd(false);
+    setShowAdd(
+      false
+    );
 
     setEditingSubscription(
       null
@@ -1802,12 +1759,50 @@ function App() {
   ======================================================= */
 
   function navigate(page) {
-    setActivePage(page);
+    setActivePage(
+      page
+    );
 
-    setMobileMenu(false);
+    setMobileMenu(
+      false
+    );
 
     setShowNotifications(
       false
+    );
+
+    setAccountMenuOpen(
+      false
+    );
+  }
+
+  /* =======================================================
+     CLOUD LOADING SCREEN
+  ======================================================= */
+
+  if (!cloudReady) {
+    return (
+      <div
+        className={`app-loading ${
+          darkMode
+            ? "dark-mode"
+            : ""
+        }`}
+      >
+        <div className="app-loading-inner">
+          <div className="app-loading-mark">
+            D
+          </div>
+
+          <strong>
+            DumbDue
+          </strong>
+
+          <span>
+            Loading your subscriptions...
+          </span>
+        </div>
+      </div>
     );
   }
 
@@ -1917,11 +1912,15 @@ function App() {
             >
 
               <div className="avatar">
+
                 {userEmail
                   ? userEmail
-                      .charAt(0)
+                      .charAt(
+                        0
+                      )
                       .toUpperCase()
                   : "A"}
+
               </div>
 
               <div className="account-info">
@@ -1953,8 +1952,10 @@ function App() {
               <div className="account-menu">
 
                 <div className="account-menu-email">
+
                   {userEmail ||
                     "Signed in"}
+
                 </div>
 
                 <button
@@ -1964,9 +1965,11 @@ function App() {
                     handleSignOut
                   }
                 >
+
                   <span>
                     Sign out
                   </span>
+
                 </button>
 
               </div>
@@ -2007,7 +2010,9 @@ function App() {
               )
             }
           >
+
             <Menu size={20} />
+
           </button>
 
           <div className="page-heading">
@@ -2071,8 +2076,6 @@ function App() {
 
             </div>
 
-            {/* NOTIFICATIONS */}
-
             <div className="notification-wrap">
 
               <button
@@ -2130,9 +2133,11 @@ function App() {
                       }
                       aria-label="Close notifications"
                     >
+
                       <X
                         size={16}
                       />
+
                     </button>
 
                   </div>
@@ -2147,15 +2152,19 @@ function App() {
                       />
 
                       <strong>
+
                         {remindersEnabled
                           ? "You're all caught up"
                           : "Reminders are off"}
+
                       </strong>
 
                       <span>
+
                         {remindersEnabled
                           ? "Nothing matches your current reminder settings."
                           : "Turn reminders back on in Settings to receive alerts."}
+
                       </span>
 
                     </div>
@@ -2174,6 +2183,7 @@ function App() {
                             type="button"
                             className="notification-item"
                             onClick={() => {
+
                               setShowNotifications(
                                 false
                               );
@@ -2181,6 +2191,7 @@ function App() {
                               navigate(
                                 "subscriptions"
                               );
+
                             }}
                           >
 
@@ -2220,6 +2231,7 @@ function App() {
                                   : `Payment due in ${notification.days} days`}
 
                                 {" • ₹"}
+
                                 {
                                   notification.amount
                                 }
@@ -2264,7 +2276,9 @@ function App() {
                 "11px",
             }}
           >
+
             {cloudSyncError}
+
           </div>
         )}
 
@@ -2487,11 +2501,13 @@ function Dashboard({
             onAdd
           }
         >
+
           <Plus
             size={17}
           />
 
           Add subscription
+
         </button>
 
       </section>
@@ -2622,7 +2638,9 @@ function Dashboard({
                       trial.name ||
                         "?"
                     )
-                      .charAt(0)
+                      .charAt(
+                        0
+                      )
                       .toUpperCase()}
 
                   </div>
@@ -2761,7 +2779,10 @@ function Dashboard({
           <div className="mini-grid">
 
             {subscriptions
-              .slice(0, 4)
+              .slice(
+                0,
+                4
+              )
               .map(
                 (
                   subscription
@@ -3138,11 +3159,8 @@ function Subscriptions({
                           subscription.id
                         )
                       }
-                      title="Mark payment as paid"
                     >
-
                       Paid
-
                     </button>
 
                   )}
@@ -3365,7 +3383,6 @@ function Calendar({
                 -1
               )
             }
-            aria-label="Previous month"
           >
             ‹
           </button>
@@ -3378,7 +3395,6 @@ function Calendar({
                 1
               )
             }
-            aria-label="Next month"
           >
             ›
           </button>
@@ -3518,7 +3534,8 @@ function HistoryPage({
   );
 
   const filteredHistory =
-    filter === "All"
+    filter ===
+    "All"
       ? history
       : history.filter(
           (payment) =>
@@ -4600,21 +4617,17 @@ function SubscriptionModal({
 
             <span className="section-kicker">
 
-              {
-                subscription
-                  ? "EDIT SUBSCRIPTION"
-                  : "NEW SUBSCRIPTION"
-              }
+              {subscription
+                ? "EDIT SUBSCRIPTION"
+                : "NEW SUBSCRIPTION"}
 
             </span>
 
             <h2>
 
-              {
-                subscription
-                  ? "Update payment"
-                  : "Add a payment"
-              }
+              {subscription
+                ? "Update payment"
+                : "Add a payment"}
 
             </h2>
 
@@ -4784,7 +4797,6 @@ function SubscriptionModal({
                 onClick={(
                   event
                 ) => {
-
                   if (
                     typeof event
                       .currentTarget
@@ -4793,7 +4805,6 @@ function SubscriptionModal({
                   ) {
                     event.currentTarget.showPicker();
                   }
-
                 }}
               />
 
@@ -4899,27 +4910,25 @@ function SubscriptionModal({
             type="submit"
           >
 
-            {
-              subscription
-                ? (
-                  <>
-                    <Edit3
-                      size={16}
-                    />
+            {subscription
+              ? (
+                <>
+                  <Edit3
+                    size={16}
+                  />
 
-                    Save changes
-                  </>
-                )
-                : (
-                  <>
-                    <Plus
-                      size={17}
-                    />
+                  Save changes
+                </>
+              )
+              : (
+                <>
+                  <Plus
+                    size={17}
+                  />
 
-                    Add subscription
-                  </>
-                )
-            }
+                  Add subscription
+                </>
+              )}
 
           </button>
 
