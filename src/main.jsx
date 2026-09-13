@@ -12,6 +12,7 @@ import "./index.css";
 
 import App from "./App.jsx";
 import Auth from "./Auth.jsx";
+import Landing from "./Landing.jsx";
 
 import { supabase } from "./lib/supabase";
 
@@ -20,6 +21,33 @@ function Root() {
     session,
     setSession,
   ] = useState(undefined);
+
+  const [
+    path,
+    setPath,
+  ] = useState(
+    window.location.pathname
+  );
+
+  useEffect(() => {
+    function handleNavigation() {
+      setPath(
+        window.location.pathname
+      );
+    }
+
+    window.addEventListener(
+      "popstate",
+      handleNavigation
+    );
+
+    return () => {
+      window.removeEventListener(
+        "popstate",
+        handleNavigation
+      );
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -81,9 +109,9 @@ function Root() {
     };
   }, []);
 
-  /* -------------------------------------------------------
-     Loading
-  ------------------------------------------------------- */
+  /*
+    Supabase is checking the current session.
+  */
 
   if (session === undefined) {
     return (
@@ -106,23 +134,46 @@ function Root() {
     );
   }
 
-  /* -------------------------------------------------------
-     Not logged in
-  ------------------------------------------------------- */
+  /*
+    Logged-in users always go directly
+    to the application.
+  */
 
-  if (!session) {
+  if (session) {
+    return <App />;
+  }
+
+  /*
+    Public pages for logged-out visitors.
+  */
+
+  if (
+    path === "/login"
+  ) {
     return <Auth />;
   }
 
-  /* -------------------------------------------------------
-     Logged in
-  ------------------------------------------------------- */
+  if (
+    path === "/signup"
+  ) {
+    return (
+      <Auth />
+    );
+  }
 
-  return <App />;
+  /*
+    Everything else opens the landing page.
+  */
+
+  return (
+    <Landing />
+  );
 }
 
 createRoot(
-  document.getElementById("root")
+  document.getElementById(
+    "root"
+  )
 ).render(
   <StrictMode>
     <Root />
