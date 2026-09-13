@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowRight,
   Eye,
@@ -10,7 +10,11 @@ import { supabase } from "./lib/supabase";
 import "./Auth.css";
 
 function Auth() {
-  const [mode, setMode] = useState("login");
+  const [mode, setMode] = useState(
+    window.location.pathname === "/signup"
+      ? "signup"
+      : "login"
+  );
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -29,12 +33,48 @@ function Auth() {
 
   const isLogin = mode === "login";
 
+  useEffect(() => {
+    function handlePathChange() {
+      setMode(
+        window.location.pathname === "/signup"
+          ? "signup"
+          : "login"
+      );
+    }
+
+    window.addEventListener(
+      "popstate",
+      handlePathChange
+    );
+
+    return () => {
+      window.removeEventListener(
+        "popstate",
+        handlePathChange
+      );
+    };
+  }, []);
+
   function switchMode(nextMode) {
     setMode(nextMode);
+
+    window.history.pushState(
+      {},
+      "",
+      nextMode === "signup"
+        ? "/signup"
+        : "/login"
+    );
+
     setError("");
     setMessage("");
     setPassword("");
     setConfirmPassword("");
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
   }
 
   async function handleSubmit(event) {
@@ -92,14 +132,6 @@ function Auth() {
           throw signInError;
         }
 
-        /*
-          Do not manually switch screens here.
-
-          main.jsx is already listening to
-          Supabase auth state changes and will
-          automatically show the dashboard.
-        */
-
       } else {
         const {
           data,
@@ -118,18 +150,12 @@ function Auth() {
           throw signUpError;
         }
 
-        /*
-          If email confirmation is enabled,
-          Supabase returns no active session
-          until the user confirms their email.
-        */
-
         if (!data.session) {
           setMessage(
             "Account created. Check your email to confirm your account, then log in."
           );
 
-          setMode("login");
+          switchMode("login");
           setPassword("");
           setConfirmPassword("");
         }
@@ -168,7 +194,7 @@ function Auth() {
           cleanEmail,
           {
             redirectTo:
-              window.location.origin,
+              `${window.location.origin}/login`,
           }
         );
 
@@ -197,8 +223,6 @@ function Auth() {
 
       <div className="auth-shell">
 
-        {/* BRAND */}
-
         <div className="auth-brand">
 
           <div className="auth-brand-mark">
@@ -216,8 +240,6 @@ function Auth() {
           </div>
 
         </div>
-
-        {/* CARD */}
 
         <div className="auth-card">
 
@@ -242,8 +264,6 @@ function Auth() {
             </p>
 
           </div>
-
-          {/* TABS */}
 
           <div className="auth-tabs">
 
@@ -277,18 +297,16 @@ function Auth() {
 
           </div>
 
-          {/* FORM */}
-
           <form
             className="auth-form"
             onSubmit={handleSubmit}
           >
 
-            {/* EMAIL */}
-
             <label className="auth-field">
 
-              <span>Email</span>
+              <span>
+                Email
+              </span>
 
               <div className="auth-input-wrap">
 
@@ -310,11 +328,11 @@ function Auth() {
 
             </label>
 
-            {/* PASSWORD */}
-
             <label className="auth-field">
 
-              <span>Password</span>
+              <span>
+                Password
+              </span>
 
               <div className="auth-input-wrap">
 
@@ -368,8 +386,6 @@ function Auth() {
 
             </label>
 
-            {/* CONFIRM PASSWORD */}
-
             {!isLogin && (
               <label className="auth-field">
 
@@ -391,9 +407,7 @@ function Auth() {
                     }
                     autoComplete="new-password"
                     placeholder="Enter it again"
-                    value={
-                      confirmPassword
-                    }
+                    value={confirmPassword}
                     onChange={(event) =>
                       setConfirmPassword(
                         event.target.value
@@ -428,8 +442,6 @@ function Auth() {
               </label>
             )}
 
-            {/* FORGOT PASSWORD */}
-
             {isLogin && (
               <div className="auth-forgot-row">
 
@@ -447,23 +459,17 @@ function Auth() {
               </div>
             )}
 
-            {/* ERROR */}
-
             {error && (
               <div className="auth-message auth-message-error">
                 {error}
               </div>
             )}
 
-            {/* SUCCESS */}
-
             {message && (
               <div className="auth-message auth-message-success">
                 {message}
               </div>
             )}
-
-            {/* SUBMIT */}
 
             <button
               className="auth-submit"
@@ -484,8 +490,6 @@ function Auth() {
             </button>
 
           </form>
-
-          {/* FOOTER */}
 
           <p className="auth-footer">
 
@@ -515,6 +519,7 @@ function Auth() {
 
         </div>
       </div>
+
     </div>
   );
 }
